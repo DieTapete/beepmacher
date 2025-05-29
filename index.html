@@ -1,156 +1,138 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beep Toy</title>
+  <title>Object Beep Toy</title>
   <style>
-    html,
-    body {
-      height: 100%;
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
-      background: #f5f5f7;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center
-    }
-
-    video {
-      width: 90vw;
-      max-width: 480px;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, .15);
-      background: #000;
-    }
-
-    button {
-      margin-top: 1rem;
-      padding: 12px 20px;
-      font-size: 1rem;
-      border: 0;
-      border-radius: 8px;
-      background: #007aff;
-      color: #fff;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, .15)
-    }
-
-    #status {
-      margin-top: .75rem;
-      color: #555;
-      font-size: .9rem;
-      text-align: center;
-      max-width: 90vw
-    }
-
-    #log {
-      margin-top: .75rem;
-      list-style: none;
-      padding: 0;
-      width: 90vw;
-      max-width: 480px;
-      font-size: .8rem;
-      color: #333
-    }
-
-    #log li {
-      background: #fff;
-      border-radius: 6px;
-      padding: 4px 8px;
-      margin-bottom: 4px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, .1)
-    }
+    html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;background:#f5f5f7;display:flex;flex-direction:column;align-items:center;justify-content:center}
+    video{width:90vw;max-width:480px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);background:#000}
+    button{margin-top:1rem;padding:12px 20px;font-size:1rem;border:0;border-radius:8px;background:#007aff;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+    #status{margin-top:.75rem;color:#555;font-size:.9rem;text-align:center;max-width:90vw}
+    #toggleLogBtn{margin-top:.5rem;font-size:.8rem;background:#8e8e93}
+    #log{display:none;margin-top:.75rem;list-style:none;padding:0;width:90vw;max-width:480px;font-size:.8rem;color:#333}
+    #log li{background:#fff;border-radius:6px;padding:4px 8px;margin-bottom:4px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
   </style>
 </head>
-
 <body>
   <video id="video" playsinline muted></video>
   <button id="startBtn">Start Camera</button>
   <div id="status">Tap the button and allow camera access.</div>
+  <button id="toggleLogBtn">Show Log</button>
   <ul id="log"></ul>
-
 
   <script>
     const video = document.getElementById('video');
     const startBtn = document.getElementById('startBtn');
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
+    const toggleLogBtn = document.getElementById('toggleLogBtn');
 
-    let canvas, ctx, audioCtx, detecting = false, lastBeep = 0, lastLog = 0;
+    let canvas, ctx, audioCtx, beepBuffer;
+    let detecting = false, lastBeep = 0;
     const messages = [];
 
-
-    function setStatus(msg) { statusEl.textContent = msg; }
-
-    // --- log helper: keeps last 5 messages on screen ---
-    function log(msg) {
+    // ---------- UI helpers ----------
+    const setStatus = msg => statusEl.textContent = msg;
+    const log = msg => {
       const time = new Date().toLocaleTimeString();
       messages.push(`[${time}] ${msg}`);
-      if (messages.length > 5) messages.shift();
+      if(messages.length > 5) messages.shift();
       logEl.innerHTML = messages.map(m => `<li>${m}</li>`).join('');
-    }
+    };
 
-    function averageBrightness(frame) {
-      const d = frame.data; let sum = 0;
-      for (let i = 0; i < d.length; i += 4) { sum += d[i] * 0.2126 + d[i + 1] * 0.7152 + d[i + 2] * 0.0722; }
-      return sum / (d.length / 4);
-    }
+    toggleLogBtn.addEventListener('click', () => {
+      const visible = logEl.style.display !== 'none';
+      logEl.style.display = visible ? 'none' : 'block';
+      toggleLogBtn.textContent = visible ? 'Show Log' : 'Hide Log';
+    });
 
-    function beep() {
-      log('Beep!');
-      if (!audioCtx) return;
-      if (audioCtx.state === 'suspended') { audioCtx.resume(); }
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.frequency.value = 1000;
-      gain.gain.value = 0.1; // moderate volume
-      osc.connect(gain).connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.2);
-      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
-    }
-
-    function detect() {
-      if (!detecting) return;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const bright = averageBrightness(ctx.getImageData(0, 0, canvas.width, canvas.height));
-      const now = performance.now();
-      if (now - lastLog > 1000) {
-        log('detecting: ' + bright)
-        lastLog = now;
+    // ---------- Image helpers ----------
+    function averageBrightness(frame){
+      const d = frame.data;
+      let sum = 0;
+      for(let i = 0; i < d.length; i += 16){
+        sum += d[i] * 0.2126 + d[i+1] * 0.7152 + d[i+2] * 0.0722;
       }
-      if (bright < 90 && now - lastBeep > 800) { beep(); lastBeep = now; }
-      requestAnimationFrame(detect);
+      return sum / (d.length / 16);
     }
 
-    async function start() {
-      if (!navigator.mediaDevices?.getUserMedia) { setStatus('getUserMedia unsupported (need HTTPS in Safari).'); return; }
-      try {
-        // Prepare audio in the user gesture
-        if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
-        if (audioCtx.state === 'suspended') { await audioCtx.resume(); }
-        log('Audio context ready.');
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    // ---------- Audio helpers ----------
+    function initAudio(){
+      if(audioCtx) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const dur = 0.2;
+      const length = audioCtx.sampleRate * dur;
+      const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      const freq = 1000;
+      for(let i=0;i<length;i++){
+        data[i] = Math.sin(2 * Math.PI * freq * i / audioCtx.sampleRate) * 0.3;
+      }
+      beepBuffer = buffer;
+      log('Audio ready.');
+    }
+
+    function beep(){
+      log('Beep function called…');
+      if(!audioCtx || !beepBuffer) return;
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      log('Beeping, audio context state: ' + audioCtx.state);
+      const src = audioCtx.createBufferSource();
+      src.buffer = beepBuffer;
+      src.connect(audioCtx.destination);
+      src.start();
+      src.onended = () => src.disconnect();
+    }
+
+    // ---------- Detection loop ----------
+    function detect(){
+      if(!detecting) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const bright = averageBrightness(ctx.getImageData(0,0,canvas.width,canvas.height));
+      const now = performance.now();
+      if(bright < 60 && now - lastBeep > 800){
+        beep();
+        lastBeep = now;
+      }
+      if(document.visibilityState === 'visible'){
+        requestAnimationFrame(detect);
+      }
+    }
+
+    // ---------- Start ----------
+    async function start(){
+      if(!navigator.mediaDevices?.getUserMedia){
+        setStatus('getUserMedia unsupported (need HTTPS in Safari).');
+        return;
+      }
+      try{
+        initAudio();
+        const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
         video.srcObject = stream;
         await video.play();
-        setStatus('Ready! Cover the camera to beep.');
+        setStatus('Detecting… cover the lens to beep.');
+        log('Front camera started.');
         canvas = document.createElement('canvas');
-        canvas.width = 160; canvas.height = 120; ctx = canvas.getContext('2d');
-        canvas.style.display = 'none';
+        canvas.width = 120; canvas.height = 90;
+        ctx = canvas.getContext('2d');
         detecting = true;
         detect();
         startBtn.style.display = 'none';
-      } catch (e) {
-        const err = 'Error: ' + e.message; 
-        setStatus(err); 
+      }catch(e){
+        const err = 'Camera/Aud error: ' + e.message;
+        setStatus(err);
         log(err);
       }
     }
 
+    document.addEventListener('visibilitychange', () => {
+      if(document.visibilityState === 'visible' && detecting){
+        detect();
+      }
+    });
+
     startBtn.addEventListener('click', start);
   </script>
 </body>
-
 </html>
