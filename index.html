@@ -1,76 +1,558 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <!-- disable zoom/scroll on mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Beep Toy</title>
 
-  <!-- PWA / Full‑Screen meta -->
-  <meta name="theme-color" content="#000000" />
+  <!-- Font & manifest -->
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600&display=swap" rel="stylesheet" />
   <link rel="manifest" href="manifest.json" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-  <meta name="apple-mobile-web-app-title" content="Beep Toy" />
+  <meta name="theme-color" content="#000000" />
 
   <style>
-    /* ------- GLOBAL DARK THEME & NO SCROLL ------------------------------- */
-    html,body{
-      height:100%;margin:0;
-      overflow:hidden;overscroll-behavior:none;touch-action:none;
-      background:#0a0a0a;color:#fafafa;
-      font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
-      display:flex;flex-direction:column;align-items:center;justify-content:center
+    /* =============== Theme tokens =============== */
+    :root {
+      --bg: #0a0a0a;
+      --fg: #fafafa;
+      --panel: rgba(26, 26, 26, 0.94);
+      --accent: #ff9100;
+      --track: #555;
+      --shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+      font-family: "Baloo 2", system-ui, sans-serif;
     }
-    /* re‑enable gestures for form controls */
-    input,select,button{touch-action:manipulation;}
+    [data-theme="light"] {
+      --bg: #f7f7f7;
+      --fg: #222;
+      --panel: rgba(255, 255, 255, 0.94);
+      --accent: #ff6f00;
+      --track: #c7c7c7;
+      --shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    }
 
-    /* ------- COMPONENTS -------------------------------------------------- */
-    video{display:none;width:90vw;max-width:480px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.6);background:#000}
+    /* =============== Layout =============== */
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      color: var(--fg);
+      overscroll-behavior: none;
+      touch-action: none;
+    }
+    input,
+    select,
+    button {
+      touch-action: manipulation;
+      font-family: inherit;
+    }
 
-    button{margin-top:1rem;padding:12px 20px;font-size:1rem;border:0;border-radius:8px;background:#007aff;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+    #statusText {
+      margin-top: 0.75rem;
+      text-align: center;
+      max-width: 90vw;
+    }
 
-    #status{margin-top:.75rem;color:#d0d0d0;font-size:.9rem;text-align:center;max-width:90vw}
-    #toggleUiBtn{margin-top:.5rem;font-size:.8rem;background:#5c5c5e}
+    button.primary {
+      padding: 14px 24px;
+      border: 0;
+      border-radius: 9999px;
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+      cursor: pointer;
+    }
+    #toggleControlsButton {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      font-size: 0.85rem;
+      background-color: #aaa;
+    }
 
-    #controls{display:none;margin-top:.75rem;width:90vw;max-width:480px;font-size:.8rem;color:#fafafa}
-    #controls label{display:block;margin-bottom:4px}
-    #controls select,#controls input{width:100%;background:#1e1e1e;color:#fafafa;border:1px solid #444;border-radius:6px;padding:4px}
+    /* =============== Control card =============== */
+    #controlsCard {
+      position: fixed;
+      left: 50%;
+      bottom: 0;
+      transform: translate(-50%, 100%);
+      width: 90vw;
+      max-width: 480px;
+      padding: 20px 24px;
+      font-size: 1rem;
+      background: var(--panel);
+      backdrop-filter: blur(20px);
+      border-radius: 20px 20px 0 0;
+      box-shadow: var(--shadow);
+      transition: transform 0.3s ease;
+    }
+    #controlsCard.open {
+      transform: translate(-50%, 0);
+    }
+    #controlsCard h2 {
+      margin: 0 0 12px;
+      font-size: 1.4rem;
+      text-align: center;
+      color: var(--accent);
+    }
+    #controlsCard label {
+      display: block;
+      margin: 14px 0 6px;
+    }
 
-    #log{display:none;margin-top:.75rem;list-style:none;padding:0;width:90vw;max-width:480px;font-size:.8rem;color:#fafafa}
-    #log li{background:#1e1e1e;border-radius:6px;padding:4px 8px;margin-bottom:4px;box-shadow:0 1px 3px rgba(0,0,0,.6)}
+    /* camera preview */
+    #videoElement {
+      display: block;
+      width: 100%;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    }
+
+    /* form controls */
+    .form-control {
+      width: 100%;
+      padding: 8px;
+      font-size: 1rem;
+      border-radius: 12px;
+      border: 1px solid var(--track);
+      background: transparent;
+      color: var(--fg);
+    }
+    #brightnessSlider {
+      -webkit-appearance: none;
+      height: 8px;
+      background: var(--track);
+      border-radius: 4px;
+    }
+    #brightnessSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+    }
+    #brightnessSlider::-moz-range-thumb {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+    }
+
+    #soundSelect,
+    #cameraSelect {
+      padding-right: 40px;
+      background: var(--panel)
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ff9100'%3E%3Cpath d='M7 10l5 5 5-5'/%3E%3C/svg%3E")
+        no-repeat right 12px center;
+      background-size: 12px;
+      -webkit-appearance: none;
+      appearance: none;
+      cursor: pointer;
+    }
+
+    #themeToggleButton {
+      margin-top: 16px;
+      padding: 10px 24px;
+      border: 2px solid var(--track);
+      border-radius: 9999px;
+      background: transparent;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+
+    /* toast */
+    #toastLog {
+      display: none;
+      position: fixed;
+      top: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      list-style: none;
+      padding: 0;
+      width: 90vw;
+      max-width: 480px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    #toastLog li {
+      background: var(--panel);
+      margin: 4px 0;
+      border-radius: 12px;
+      padding: 6px 10px;
+      box-shadow: var(--shadow);
+    }
+
+    /* modal */
+    #errorModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 20px;
+    }
   </style>
 </head>
 <body>
-  <video id="video" playsinline muted></video>
-  <button id="startBtn">Start Camera</button>
-  <div id="status">Tap the button and allow camera access.<br>The camera is only used to detect brightness.</div>
-  <button id="toggleUiBtn">Show Controls</button>
+  <!-- Control card -->
+  <div id="controlsCard" aria-labelledby="controlsHeading">
+    <h2 id="controlsHeading">Beep Toy Controls</h2>
+    <video id="videoElement" playsinline muted></video>
 
-  <!-- hidden controls -->
-  <div id="controls">
-    <label>Brightness threshold: <span id="thresholdValue">90</span></label>
-    <input id="thresholdSlider" type="range" min="10" max="255" value="90" step="1">
+    <label>
+      Brightness threshold: <span id="thresholdValue"></span>
+    </label>
+    <input id="brightnessSlider" class="form-control" type="range" min="10" max="255" step="1" />
 
-    <label style="margin-top:8px;">Sound:</label>
-    <select id="soundSelect">
-      <option value="1000" selected>Beep (1 kHz)</option>
-      <option value="500">Low (0.5 kHz)</option>
-      <option value="1500">High (1.5 kHz)</option>
-      <option value="2000">Ultra (2 kHz)</option>
-    </select>
+    <label for="soundSelect">Sound pitch</label>
+    <select id="soundSelect" class="form-control"></select>
+
+    <label for="cameraSelect">Camera</label>
+    <select id="cameraSelect" class="form-control"></select>
+
+    <button id="themeToggleButton">
+      <span id="themeIcon">🌙</span>
+      <span id="themeLabel">Light Mode</span>
+    </button>
   </div>
 
-  <ul id="log"></ul>
+  <!-- chrome -->
+  <button id="startButton" class="primary">Start</button>
+  <div id="statusText" role="status" aria-live="polite"></div>
+  <button id="toggleControlsButton" class="primary">Show Controls</button>
+  <ul id="toastLog" aria-live="polite"></ul>
+  <div id="errorModal" role="alertdialog" aria-modal="true"></div>
 
-  <!-- === JS remains unchanged (objects: CFG, UI, AudioSys, Vision, boot) === -->
   <script>
-  const CFG={DEFAULT_THRESHOLD:90,COOLDOWN_MS:800,CANVAS:{w:120,h:90},SAMPLE_STEP:16,DEFAULT_FREQ:1000};
-  if('serviceWorker'in navigator){navigator.serviceWorker.register('sw.js').catch(e=>console.log('SW fail',e));}
-  const UI=(()=>{const e={video:video,startBtn:startBtn,status:status,log:log,toggle:toggleUiBtn,controls:controls,threshSlider:thresholdSlider,threshVal:thresholdValue,soundSelect:soundSelect};const m=[];const setStatus=t=>e.status.textContent=t;function logMsg(t){const time=new Date().toLocaleTimeString();m.push(`[${time}] ${t}`);if(m.length>5)m.shift();e.log.innerHTML=m.map(v=>`<li>${v}</li>`).join('');}function toggleUI(){const v=e.video.style.display!=='none';const d=v?'none':'block';['video','log','controls'].forEach(k=>e[k].style.display=d);e.toggle.textContent=v?'Show Controls':'Hide Controls';}function initControls(th,snd){e.threshSlider.addEventListener('input',()=>{const v=+e.threshSlider.value;e.threshVal.textContent=v;th(v);});e.soundSelect.addEventListener('change',()=>snd(+e.soundSelect.value));e.toggle.addEventListener('click',toggleUI);}return{els:e,setStatus,log:logMsg,initControls};})();
-  const AudioSys=(()=>{let ctx;const buf={};let freq=CFG.DEFAULT_FREQ;const ensure=()=>{if(!ctx)ctx=new(window.AudioContext||window.webkitAudioContext)()};const mk=f=>{const l=ctx.sampleRate*0.2,b=ctx.createBuffer(1,l,ctx.sampleRate),d=b.getChannelData(0);for(let i=0;i<l;i++)d[i]=Math.sin(2*Math.PI*f*i/ctx.sampleRate);return b};const get=f=>buf[f]||(buf[f]=mk(f));const set=f=>{freq=f;UI.log(`Sound ${f} Hz`)};const beep=()=>{if(!ctx)return;if(ctx.state==='suspended')ctx.resume();const s=ctx.createBufferSource();s.buffer=get(freq);s.connect(ctx.destination);s.start();s.onended=()=>s.disconnect();};return{init:ensure,setFreq:set,beep};})();
-  const Vision=(()=>{let cv,ct,det=false,last=0,thr=CFG.DEFAULT_THRESHOLD;const avg=f=>{const d=f.data;let s=0;for(let i=0;i<d.length;i+=CFG.SAMPLE_STEP)s+=d[i]*0.2126+d[i+1]*0.7152+d[i+2]*0.0722;return s/(d.length/CFG.SAMPLE_STEP)};const loop=()=>{if(!det)return;ct.drawImage(UI.els.video,0,0,cv.width,cv.height);const b=avg(ct.getImageData(0,0,cv.width,cv.height));const n=performance.now();if(b<thr&&n-last>CFG.COOLDOWN_MS){AudioSys.beep();last=n;}if(document.visibilityState==='visible')requestAnimationFrame(loop);};return{init:()=>{cv=document.createElement('canvas');cv.width=CFG.CANVAS.w;cv.height=CFG.CANVAS.h;ct=cv.getContext('2d');},start:()=>{det=true;loop();},setThreshold:v=>thr=v};})();
-  (function(){UI.initControls(Vision.setThreshold,AudioSys.setFreq);async function start(){if(!navigator.mediaDevices?.getUserMedia){UI.setStatus('getUserMedia unsupported');return;}try{AudioSys.init();AudioSys.beep();const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});UI.els.video.srcObject=s;await UI.els.video.play();UI.setStatus('Detecting…');UI.log('Camera started');Vision.init();Vision.start();UI.els.startBtn.style.display='none';}catch(e){UI.setStatus(e.message);UI.log(e.message);}}document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')Vision.start();});UI.els.startBtn.addEventListener('click',start);}());
+    /* ========== helpers ========== */
+    const $ = (id) => document.getElementById(id);
+    const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+    const load = (k, d) => JSON.parse(localStorage.getItem(k) ?? JSON.stringify(d));
+
+    /* ========== configuration ========== */
+    const CONFIG = {
+      threshold: load("threshold", 90),
+      cooldown: 800,
+      step: 16,
+      canvas: { w: 120, h: 90 },
+      freq: load("freq", 1000),
+      facing: load("facing", ""), // empty selects first camera
+      theme: load("theme", "dark"),
+    };
+    document.documentElement.dataset.theme = CONFIG.theme;
+
+    /* ========== UI module ========== */
+    const UI = (() => {
+      const el = {
+        card: $("controlsCard"),
+        toggle: $("toggleControlsButton"),
+        start: $("startButton"),
+        status: $("statusText"),
+        video: $("videoElement"),
+        slider: $("brightnessSlider"),
+        sliderVal: $("thresholdValue"),
+        pitch: $("soundSelect"),
+        cams: $("cameraSelect"),
+        themeBtn: $("themeToggleButton"),
+        themeIcon: $("themeIcon"),
+        themeLbl: $("themeLabel"),
+        toast: $("toastLog"),
+        modal: $("errorModal"),
+      };
+
+      /* toast */
+      let buffer = [];
+      function toast(msg) {
+        buffer.push(msg);
+        if (buffer.length > 3) buffer.shift();
+        el.toast.innerHTML = buffer.map((m) => `<li>${m}</li>`).join("");
+        el.toast.style.display = "block";
+        clearTimeout(toast.timer);
+        toast.timer = setTimeout(() => {
+          buffer.length = 0;
+          el.toast.style.display = "none";
+        }, 3000);
+      }
+
+      /* card */
+      function toggleCard(force) {
+        const show = force ?? !el.card.classList.contains("open");
+        el.card.classList.toggle("open", show);
+        el.toggle.textContent = show ? "Hide Controls" : "Show Controls";
+      }
+      el.toggle.addEventListener("click", () => toggleCard());
+      document.addEventListener("click", (e) => {
+        if (
+          el.card.classList.contains("open") &&
+          !el.card.contains(e.target) &&
+          e.target !== el.toggle
+        ) {
+          toggleCard(false);
+        }
+      });
+
+      /* theme */
+      function flipTheme() {
+        const root = document.documentElement;
+        const dark = root.dataset.theme === "dark";
+        root.dataset.theme = dark ? "light" : "dark";
+        el.themeLbl.textContent = dark ? "Dark Mode" : "Light Mode";
+        el.themeIcon.textContent = dark ? "☀️" : "🌙";
+        save("theme", root.dataset.theme);
+      }
+      el.themeBtn.addEventListener("click", flipTheme);
+      flipTheme(); // revert (sets label correctly)
+      flipTheme();
+
+      return {
+        el,
+        toast,
+        setStatus: (t) => (el.status.innerHTML = t),
+        toggleCard,
+      };
+    })();
+
+    /* ========== Beeper ========== */
+    const Beeper = (() => {
+      let ctx;
+      const cache = new Map();
+      let freq = CONFIG.freq;
+
+      function ensure() {
+        ctx ||= new (window.AudioContext || window.webkitAudioContext)();
+      }
+      function buffer(f) {
+        if (!cache.has(f)) {
+          const len = ctx.sampleRate * 0.2;
+          const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+          const data = buf.getChannelData(0);
+          for (let i = 0; i < len; i++) {
+            data[i] = Math.sin((2 * Math.PI * f * i) / ctx.sampleRate);
+          }
+          cache.set(f, buf);
+        }
+        return cache.get(f);
+      }
+      return {
+        init() {
+          ensure();
+        },
+        setFreq(f) {
+          freq = f;
+          save("freq", f);
+          UI.toast(`Pitch ${f} Hz`);
+        },
+        beep() {
+          if (!ctx) return;
+          if (ctx.state === "suspended") ctx.resume();
+          const src = ctx.createBufferSource();
+          src.buffer = buffer(freq);
+          src.connect(ctx.destination);
+          src.start();
+        },
+      };
+    })();
+
+    /* ========== Camera manager ========== */
+    const CameraManager = (() => {
+      let stream = null;
+      let track = null;
+
+      async function listCams() {
+        return (await navigator.mediaDevices.enumerateDevices()).filter(
+          (d) => d.kind === "videoinput"
+        );
+      }
+
+      async function fillCamSelect() {
+        const cams = await listCams();
+        UI.el.cams.innerHTML = "";
+        cams.forEach((d, idx) => {
+          const o = document.createElement("option");
+          o.value = d.deviceId;
+          o.textContent = d.label || `Camera ${idx + 1}`;
+          UI.el.cams.appendChild(o);
+        });
+        if (!cams.length) {
+          UI.el.cams.disabled = true;
+          return;
+        }
+        const restore = cams.find((c) => c.deviceId === CONFIG.facing);
+        UI.el.cams.value = restore ? restore.deviceId : cams[0].deviceId;
+        save("facing", UI.el.cams.value);
+      }
+
+      async function start(deviceId) {
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: deviceId } },
+        });
+        track = stream.getVideoTracks()[0];
+        UI.el.video.srcObject = stream;
+        await UI.el.video.play();
+        BrightnessDetector.attachTrack(track);
+      }
+
+      function pause() {
+        if (track) track.enabled = false;
+      }
+      function resume() {
+        if (track) track.enabled = true;
+      }
+
+      return { fillCamSelect, start, pause, resume };
+    })();
+
+    /* ========== Brightness detector ========== */
+    const BrightnessDetector = (() => {
+      let canvas,
+        ctx,
+        threshold = CONFIG.threshold,
+        last = 0,
+        active = false;
+
+      function ensureCanvas() {
+        if (canvas) return;
+        canvas = document.createElement("canvas");
+        canvas.width = CONFIG.canvas.w;
+        canvas.height = CONFIG.canvas.h;
+        ctx = canvas.getContext("2d");
+      }
+      function luma(img) {
+        const d = img.data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += CONFIG.step) {
+          sum += d[i] * 0.2126 + d[i + 1] * 0.7152 + d[i + 2] * 0.0722;
+        }
+        return sum / (d.length / CONFIG.step);
+      }
+      function loop() {
+        if (!active) return;
+        ctx.drawImage(UI.el.video, 0, 0, canvas.width, canvas.height);
+        const bright = luma(
+          ctx.getImageData(0, 0, canvas.width, canvas.height)
+        );
+        const now = performance.now();
+        if (bright < threshold && now - last > CONFIG.cooldown) {
+          Beeper.beep();
+          last = now;
+        }
+        requestAnimationFrame(loop);
+      }
+      return {
+        attachTrack(t) {
+          t.enabled = true;
+        },
+        start() {
+          ensureCanvas();
+          if (!active) {
+            active = true;
+            loop();
+          }
+        },
+        pause() {
+          active = false;
+        },
+        setThreshold(v) {
+          threshold = v;
+          save("threshold", v);
+          UI.el.sliderVal.textContent = v;
+        },
+      };
+    })();
+
+    /* ========== modal ========== */
+    function showError(html) {
+      UI.el.modal.innerHTML = `<div style="max-width:320px">${html}<br/><br/><button onclick=\"this.closest('#errorModal').style.display='none'\">Close</button></div>`;
+      UI.el.modal.style.display = "flex";
+    }
+
+    /* ========== Boot ========== */
+    (async function boot() {
+      const { el } = UI;
+
+      /* initial control values */
+      el.slider.value = CONFIG.threshold;
+      el.sliderVal.textContent = CONFIG.threshold;
+
+      [
+        { v: 500, label: "Low" },
+        { v: 1000, label: "Mid" },
+        { v: 1500, label: "High" },
+        { v: 2000, label: "Ultra" },
+      ].forEach(({ v, label }) => {
+        const option = document.createElement("option");
+        option.value = v;
+        option.textContent = label;
+        el.pitch.appendChild(option);
+      });
+      el.pitch.value = CONFIG.freq;
+
+      await CameraManager.fillCamSelect();
+
+      /* bindings */
+      el.slider.addEventListener("input", (e) => {
+        BrightnessDetector.setThreshold(+e.target.value);
+      });
+      el.pitch.addEventListener("change", (e) => {
+        Beeper.setFreq(+e.target.value);
+      });
+      el.cams.addEventListener("change", async (e) => {
+        try {
+          await CameraManager.start(e.target.value);
+          UI.toast("Camera switched");
+        } catch (err) {
+          UI.setStatus(err.message);
+        }
+      });
+
+      async function startApp() {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          UI.setStatus("Camera API not available");
+          return;
+        }
+        try {
+          Beeper.init();
+          await CameraManager.start(el.cams.value);
+          BrightnessDetector.start();
+          UI.setStatus("Cover the lens to beep");
+          el.start.style.display = "none";
+        } catch (err) {
+          if (err.name === "NotAllowedError") {
+            showError("Camera access denied.<br/>Enable it in browser settings.");
+          } else {
+            UI.setStatus(err.message);
+          }
+        }
+      }
+      el.start.addEventListener("click", startApp);
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") {
+          BrightnessDetector.pause();
+          CameraManager.pause();
+        } else {
+          BrightnessDetector.start();
+          CameraManager.resume();
+        }
+      });
+    })();
   </script>
 </body>
 </html>
