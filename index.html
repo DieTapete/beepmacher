@@ -28,16 +28,17 @@
     const logEl = document.getElementById('log');
     const toggleLogBtn = document.getElementById('toggleLogBtn');
 
-    let canvas, ctx, audioCtx, beepBuffer;
+    let canvas, ctx;
+    let audioCtx, beepBuffer;
     let detecting = false, lastBeep = 0;
     const messages = [];
 
     // ---------- UI helpers ----------
-    const setStatus = msg => statusEl.textContent = msg;
+    const setStatus = msg => (statusEl.textContent = msg);
     const log = msg => {
       const time = new Date().toLocaleTimeString();
       messages.push(`[${time}] ${msg}`);
-      if(messages.length > 5) messages.shift();
+      if (messages.length > 5) messages.shift();
       logEl.innerHTML = messages.map(m => `<li>${m}</li>`).join('');
     };
 
@@ -48,86 +49,98 @@
     });
 
     // ---------- Image helpers ----------
-    function averageBrightness(frame){
+    function averageBrightness(frame) {
       const d = frame.data;
       let sum = 0;
-      for(let i = 0; i < d.length; i += 16){
-        sum += d[i] * 0.2126 + d[i+1] * 0.7152 + d[i+2] * 0.0722;
+      for (let i = 0; i < d.length; i += 16) {
+        sum += d[i] * 0.2126 + d[i + 1] * 0.7152 + d[i + 2] * 0.0722;
       }
       return sum / (d.length / 16);
     }
 
     // ---------- Audio helpers ----------
-    function initAudio(){
-      if(audioCtx) return;
+    function initAudio() {
+      if (audioCtx) return;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const dur = 0.2;
       const length = audioCtx.sampleRate * dur;
       const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
       const data = buffer.getChannelData(0);
       const freq = 1000;
-      for(let i=0;i<length;i++){
-        data[i] = Math.sin(2 * Math.PI * freq * i / audioCtx.sampleRate) * 0.3;
+      for (let i = 0; i < length; i++) {
+        data[i] = Math.sin((2 * Math.PI * freq * i) / audioCtx.sampleRate);
       }
       beepBuffer = buffer;
       log('Audio ready.');
     }
 
-    function beep(){
-      log('Beep function called…');
-      if(!audioCtx || !beepBuffer) return;
-      if(audioCtx.state === 'suspended') audioCtx.resume();
-      log('Beeping, audio context state: ' + audioCtx.state);
+    function beep() {
+      if (!audioCtx || !beepBuffer) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0.9; // louder
       const src = audioCtx.createBufferSource();
       src.buffer = beepBuffer;
-      src.connect(audioCtx.destination);
+      src.connect(gain).connect(audioCtx.destination);
       src.start();
-      src.onended = () => src.disconnect();
+      src.onended = () => {
+        src.disconnect();
+        gain.disconnect();
+      };
+      log('Beep!');
     }
 
     // ---------- Detection loop ----------
-    function detect(){
-      if(!detecting) return;
+    function detect() {
+      if (!detecting) return;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const bright = averageBrightness(ctx.getImageData(0,0,canvas.width,canvas.height));
+      const bright = averageBrightness(ctx.getImageData(0, 0, canvas.width, canvas.height));
       const now = performance.now();
-      if(bright < 60 && now - lastBeep > 800){
+      if (bright < 90 && now - lastBeep > 800) {
         beep();
         lastBeep = now;
       }
-      if(document.visibilityState === 'visible'){
+      if (document.visibilityState === 'visible') {
         requestAnimationFrame(detect);
       }
     }
 
     // ---------- Start ----------
-    async function start(){
-      if(!navigator.mediaDevices?.getUserMedia){
+    async function start() {
+      if (!navigator.mediaDevices?.getUserMedia) {
         setStatus('getUserMedia unsupported (need HTTPS in Safari).');
         return;
       }
-      try{
+      try {
         initAudio();
-        const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
+        // test beep inside the user gesture (iOS requirement)
+        beep();
+
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
         video.srcObject = stream;
         await video.play();
         setStatus('Detecting… cover the lens to beep.');
         log('Front camera started.');
+
+        // small off-screen canvas for fast processing
         canvas = document.createElement('canvas');
-        canvas.width = 120; canvas.height = 90;
+        canvas.width = 120;
+        canvas.height = 90;
         ctx = canvas.getContext('2d');
+
         detecting = true;
         detect();
         startBtn.style.display = 'none';
-      }catch(e){
+      } catch (e) {
         const err = 'Camera/Aud error: ' + e.message;
         setStatus(err);
         log(err);
       }
     }
 
+    // Pause detection when tab hidden / resume on show
     document.addEventListener('visibilitychange', () => {
-      if(document.visibilityState === 'visible' && detecting){
+      if (document.visibilityState === 'visible' && detecting) {
         detect();
       }
     });
