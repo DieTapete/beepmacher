@@ -9,21 +9,36 @@
     video{width:90vw;max-width:480px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);background:#000;}
     button{margin-top:1rem;padding:12px 20px;font-size:1rem;border:0;border-radius:8px;background:#007aff;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.15)}
     #status{margin-top:.75rem;color:#555;font-size:.9rem;text-align:center;max-width:90vw}
+    #log{margin-top:.75rem;list-style:none;padding:0;width:90vw;max-width:480px;font-size:.8rem;color:#333}
+    #log li{background:#fff;border-radius:6px;padding:4px 8px;margin-bottom:4px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
   </style>
 </head>
 <body>
   <video id="video" playsinline muted></video>
   <button id="startBtn">Start Camera</button>
   <div id="status">Tap the button and allow camera access.</div>
+  <ul id="log"></ul>
+
 
   <script>
     const video = document.getElementById('video');
     const startBtn = document.getElementById('startBtn');
     const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
 
-    let canvas, ctx, audioCtx, detecting = false, lastBeep = 0;
+    let canvas, ctx, audioCtx, detecting = false, lastBeep = 0, lastLog = 0;
+    const messages = [];
+
 
     function setStatus(msg){statusEl.textContent = msg;}
+
+    // --- log helper: keeps last 5 messages on screen ---
+    function log(msg){
+      const time = new Date().toLocaleTimeString();
+      messages.push(`[${time}] ${msg}`);
+      if(messages.length>5) messages.shift();
+      logEl.innerHTML = messages.map(m=>`<li>${m}</li>`).join('');
+    }
 
     function averageBrightness(frame){
       const d = frame.data;let sum = 0;
@@ -32,7 +47,7 @@
     }
 
     function beep(){
-      setStatus('Beep!');
+      log('Beep!');
       if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
       if(audioCtx.state==='suspended') audioCtx.resume();
       const osc = audioCtx.createOscillator();
@@ -47,7 +62,11 @@
       ctx.drawImage(video,0,0,canvas.width,canvas.height);
       const bright = averageBrightness(ctx.getImageData(0,0,canvas.width,canvas.height));
       const now = performance.now();
-      if(bright < 60 && now - lastBeep > 800){beep();lastBeep = now;}
+      if (now - lastLog > 1000) {
+        log('detecting: '+bright)
+        lastLog = now;
+      }
+      if(bright < 90 && now - lastBeep > 800){beep();lastBeep = now;}
       requestAnimationFrame(detect);
     }
 
