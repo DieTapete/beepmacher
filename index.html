@@ -3,13 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Object Beep Toy</title>
+  <title>Beep Toy</title>
+
+  <!-- PWA / Full‑Screen meta -->
+  <meta name="theme-color" content="#007aff" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Beep Toy" />
+
   <style>
     html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;background:#f5f5f7;display:flex;flex-direction:column;align-items:center;justify-content:center}
-    video{width:90vw;max-width:480px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);background:#000}
+    video{display:none;width:90vw;max-width:480px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);background:#000}
     button{margin-top:1rem;padding:12px 20px;font-size:1rem;border:0;border-radius:8px;background:#007aff;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.15)}
     #status{margin-top:.75rem;color:#555;font-size:.9rem;text-align:center;max-width:90vw}
-    #toggleLogBtn{margin-top:.5rem;font-size:.8rem;background:#8e8e93}
+    #toggleUiBtn{margin-top:.5rem;font-size:.8rem;background:#8e8e93}
+    #controls{display:none;margin-top:.75rem;width:90vw;max-width:480px;font-size:.8rem;color:#333}
+    #controls label{display:block;margin-bottom:4px}
+    #controls select,#controls input{width:100%}
     #log{display:none;margin-top:.75rem;list-style:none;padding:0;width:90vw;max-width:480px;font-size:.8rem;color:#333}
     #log li{background:#fff;border-radius:6px;padding:4px 8px;margin-bottom:4px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
   </style>
@@ -17,135 +28,178 @@
 <body>
   <video id="video" playsinline muted></video>
   <button id="startBtn">Start Camera</button>
-  <div id="status">Tap the button and allow camera access.</div>
-  <button id="toggleLogBtn">Show Log</button>
+  <div id="status">Tap the button and allow camera access.<br>The camera is only used to detect brightness.</div>
+  <button id="toggleUiBtn">Show Controls</button>
+
+  <!-- hidden controls -->
+  <div id="controls">
+    <label>Brightness threshold: <span id="thresholdValue">90</span></label>
+    <input id="thresholdSlider" type="range" min="10" max="255" value="90" step="1">
+
+    <label style="margin-top:8px;">Sound:</label>
+    <select id="soundSelect">
+      <option value="1000" selected>Beep (1 kHz)</option>
+      <option value="500">Low (0.5 kHz)</option>
+      <option value="1500">High (1.5 kHz)</option>
+      <option value="2000">Ultra (2 kHz)</option>
+    </select>
+  </div>
+
   <ul id="log"></ul>
 
   <script>
-    const video = document.getElementById('video');
-    const startBtn = document.getElementById('startBtn');
-    const statusEl = document.getElementById('status');
-    const logEl = document.getElementById('log');
-    const toggleLogBtn = document.getElementById('toggleLogBtn');
+  /* ========================= CONFIG ======================================= */
+  const CFG = {
+    DEFAULT_THRESHOLD: 90,
+    COOLDOWN_MS: 800,
+    CANVAS: { w: 120, h: 90 },
+    SAMPLE_STEP: 16,
+    DEFAULT_FREQ: 1000
+  };
 
-    let canvas, ctx;
-    let audioCtx, beepBuffer;
-    let detecting = false, lastBeep = 0;
+  /* ========================= SERVICE WORKER =============================== */
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(err => console.log('SW register failed', err));
+  }
+
+  /* ========================= UI MODULE ==================================== */
+  const UI = (()=>{
+    const els = {
+      video: document.getElementById('video'),
+      startBtn: document.getElementById('startBtn'),
+      status: document.getElementById('status'),
+      log: document.getElementById('log'),
+      toggle: document.getElementById('toggleUiBtn'),
+      controls: document.getElementById('controls'),
+      threshSlider: document.getElementById('thresholdSlider'),
+      threshVal: document.getElementById('thresholdValue'),
+      soundSelect: document.getElementById('soundSelect')
+    };
     const messages = [];
 
-    // ---------- UI helpers ----------
-    const setStatus = msg => (statusEl.textContent = msg);
-    const log = msg => {
+    function setStatus(msg){ els.status.textContent = msg; }
+
+    function log(msg){
       const time = new Date().toLocaleTimeString();
       messages.push(`[${time}] ${msg}`);
-      if (messages.length > 5) messages.shift();
-      logEl.innerHTML = messages.map(m => `<li>${m}</li>`).join('');
-    };
-
-    toggleLogBtn.addEventListener('click', () => {
-      const visible = logEl.style.display !== 'none';
-      logEl.style.display = visible ? 'none' : 'block';
-      toggleLogBtn.textContent = visible ? 'Show Log' : 'Hide Log';
-    });
-
-    // ---------- Image helpers ----------
-    function averageBrightness(frame) {
-      const d = frame.data;
-      let sum = 0;
-      for (let i = 0; i < d.length; i += 16) {
-        sum += d[i] * 0.2126 + d[i + 1] * 0.7152 + d[i + 2] * 0.0722;
-      }
-      return sum / (d.length / 16);
+      if(messages.length>5) messages.shift();
+      els.log.innerHTML = messages.map(m=>`<li>${m}</li>`).join('');
     }
 
-    // ---------- Audio helpers ----------
-    function initAudio() {
-      if (audioCtx) return;
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const dur = 0.2;
-      const length = audioCtx.sampleRate * dur;
-      const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
-      const data = buffer.getChannelData(0);
-      const freq = 1000;
-      for (let i = 0; i < length; i++) {
-        data[i] = Math.sin((2 * Math.PI * freq * i) / audioCtx.sampleRate);
-      }
-      beepBuffer = buffer;
-      log('Audio ready.');
+    function toggleInterface(){
+      const visible = els.video.style.display !== 'none';
+      const display = visible ? 'none':'block';
+      ['video','log','controls'].forEach(k=>els[k].style.display = display);
+      els.toggle.textContent = visible? 'Show Controls':'Hide Controls';
     }
 
-    function beep() {
-      if (!audioCtx || !beepBuffer) return;
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      const gain = audioCtx.createGain();
-      gain.gain.value = 0.9; // louder
-      const src = audioCtx.createBufferSource();
-      src.buffer = beepBuffer;
-      src.connect(gain).connect(audioCtx.destination);
+    function initControls(onThresholdChange,onSoundChange){
+      els.threshSlider.addEventListener('input',()=>{
+        const val = Number(els.threshSlider.value);
+        els.threshVal.textContent = val;
+        onThresholdChange(val);
+      });
+      els.soundSelect.addEventListener('change',()=>{
+        onSoundChange(Number(els.soundSelect.value));
+      });
+      els.toggle.addEventListener('click', toggleInterface);
+    }
+
+    return { els, setStatus, log, initControls, toggleInterface };
+  })();
+
+  /* ========================= AUDIO MODULE ================================= */
+  const AudioSys = (()=>{
+    let ctx=null;
+    const buffers={};
+    let freq = CFG.DEFAULT_FREQ;
+
+    function _ensureCtx(){ if(!ctx) ctx = new (window.AudioContext||window.webkitAudioContext)(); }
+
+    function _createBuffer(frequency){
+      const len = ctx.sampleRate*0.2;
+      const buf = ctx.createBuffer(1,len,ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for(let i=0;i<len;i++){ data[i]=Math.sin(2*Math.PI*frequency*i/ctx.sampleRate); }
+      return buf;
+    }
+
+    function _getBuffer(frequency){ return buffers[frequency] ||= _createBuffer(frequency); }
+
+    function setFreq(f){ freq=f; UI.log(`Sound frequency set to ${f} Hz`);}    
+
+    function beep(){
+      if(!ctx) return;
+      if(ctx.state==='suspended') ctx.resume();
+      const src = ctx.createBufferSource();
+      src.buffer = _getBuffer(freq);
+      src.connect(ctx.destination);
       src.start();
-      src.onended = () => {
-        src.disconnect();
-        gain.disconnect();
-      };
-      log('Beep!');
+      src.onended=()=>src.disconnect();
+      UI.log(`Beep (${freq} Hz)`);
     }
 
-    // ---------- Detection loop ----------
-    function detect() {
-      if (!detecting) return;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const bright = averageBrightness(ctx.getImageData(0, 0, canvas.width, canvas.height));
-      const now = performance.now();
-      if (bright < 90 && now - lastBeep > 800) {
-        beep();
-        lastBeep = now;
-      }
-      if (document.visibilityState === 'visible') {
-        requestAnimationFrame(detect);
-      }
+    return { init: _ensureCtx, setFreq, beep };
+  })();
+
+  /* ========================= VISION MODULE ================================ */
+  const Vision = (()=>{
+    let canvas, ctx;
+    let detecting=false, lastBeep=0, threshold=CFG.DEFAULT_THRESHOLD;
+
+    function _avgBrightness(frame){
+      const d=frame.data; let sum=0;
+      for(let i=0;i<d.length;i+=CFG.SAMPLE_STEP){ sum += d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722; }
+      return sum/(d.length/CFG.SAMPLE_STEP);
     }
 
-    // ---------- Start ----------
-    async function start() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setStatus('getUserMedia unsupported (need HTTPS in Safari).');
-        return;
-      }
-      try {
-        initAudio();
-        // test beep inside the user gesture (iOS requirement)
-        beep();
-
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-        video.srcObject = stream;
-        await video.play();
-        setStatus('Detecting… cover the lens to beep.');
-        log('Front camera started.');
-
-        // small off-screen canvas for fast processing
-        canvas = document.createElement('canvas');
-        canvas.width = 120;
-        canvas.height = 90;
-        ctx = canvas.getContext('2d');
-
-        detecting = true;
-        detect();
-        startBtn.style.display = 'none';
-      } catch (e) {
-        const err = 'Camera/Aud error: ' + e.message;
-        setStatus(err);
-        log(err);
-      }
+    function _detect(){
+      if(!detecting) return;
+      ctx.drawImage(UI.els.video,0,0,canvas.width,canvas.height);
+      const bright=_avgBrightness(ctx.getImageData(0,0,canvas.width,canvas.height));
+      const now=performance.now();
+      if(bright<threshold && now-lastBeep>CFG.COOLDOWN_MS){ AudioSys.beep(); lastBeep=now; }
+      if(document.visibilityState==='visible') requestAnimationFrame(_detect);
     }
 
-    // Pause detection when tab hidden / resume on show
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && detecting) {
-        detect();
-      }
+    function start(){ detecting=true; _detect(); }
+
+    function setThreshold(t){ threshold=t; }
+
+    function init(){
+      canvas=document.createElement('canvas');
+      canvas.width=CFG.CANVAS.w; canvas.height=CFG.CANVAS.h;
+      ctx=canvas.getContext('2d');
+    }
+
+    return { init, start, setThreshold };
+  })();
+
+  /* ========================= BOOT ======================================== */
+  (function boot(){
+    const { video, startBtn } = UI.els;
+
+    UI.initControls(Vision.setThreshold, AudioSys.setFreq);
+
+    async function start(){
+      if(!navigator.mediaDevices?.getUserMedia){ UI.setStatus('getUserMedia unsupported (need HTTPS).'); return; }
+      try{
+        AudioSys.init(); AudioSys.beep();
+        const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user' } });
+        video.srcObject = stream; await video.play();
+        UI.setStatus('Detecting… cover the lens to beep.');
+        UI.log('Front camera started.');
+        Vision.init(); Vision.start();
+        startBtn.style.display='none';
+      }catch(e){ UI.setStatus('Camera/Aud error: '+e.message); UI.log(e.message); }
+    }
+
+    document.addEventListener('visibilitychange',()=>{
+      if(document.visibilityState==='visible') Vision.start();
     });
 
     startBtn.addEventListener('click', start);
+  })();
   </script>
 </body>
 </html>
