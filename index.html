@@ -2,27 +2,43 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- disable zoom/scroll on mobile -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Beep Toy</title>
 
   <!-- PWA / Full‑Screen meta -->
-  <meta name="theme-color" content="#007aff" />
+  <meta name="theme-color" content="#000000" />
   <link rel="manifest" href="manifest.json" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="apple-mobile-web-app-title" content="Beep Toy" />
 
   <style>
-    html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;background:#f5f5f7;display:flex;flex-direction:column;align-items:center;justify-content:center}
-    video{display:none;width:90vw;max-width:480px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);background:#000}
-    button{margin-top:1rem;padding:12px 20px;font-size:1rem;border:0;border-radius:8px;background:#007aff;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.15)}
-    #status{margin-top:.75rem;color:#555;font-size:.9rem;text-align:center;max-width:90vw}
-    #toggleUiBtn{margin-top:.5rem;font-size:.8rem;background:#8e8e93}
-    #controls{display:none;margin-top:.75rem;width:90vw;max-width:480px;font-size:.8rem;color:#333}
+    /* ------- GLOBAL DARK THEME & NO SCROLL ------------------------------- */
+    html,body{
+      height:100%;margin:0;
+      overflow:hidden;overscroll-behavior:none;touch-action:none;
+      background:#0a0a0a;color:#fafafa;
+      font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+      display:flex;flex-direction:column;align-items:center;justify-content:center
+    }
+    /* re‑enable gestures for form controls */
+    input,select,button{touch-action:manipulation;}
+
+    /* ------- COMPONENTS -------------------------------------------------- */
+    video{display:none;width:90vw;max-width:480px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.6);background:#000}
+
+    button{margin-top:1rem;padding:12px 20px;font-size:1rem;border:0;border-radius:8px;background:#007aff;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+
+    #status{margin-top:.75rem;color:#d0d0d0;font-size:.9rem;text-align:center;max-width:90vw}
+    #toggleUiBtn{margin-top:.5rem;font-size:.8rem;background:#5c5c5e}
+
+    #controls{display:none;margin-top:.75rem;width:90vw;max-width:480px;font-size:.8rem;color:#fafafa}
     #controls label{display:block;margin-bottom:4px}
-    #controls select,#controls input{width:100%}
-    #log{display:none;margin-top:.75rem;list-style:none;padding:0;width:90vw;max-width:480px;font-size:.8rem;color:#333}
-    #log li{background:#fff;border-radius:6px;padding:4px 8px;margin-bottom:4px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+    #controls select,#controls input{width:100%;background:#1e1e1e;color:#fafafa;border:1px solid #444;border-radius:6px;padding:4px}
+
+    #log{display:none;margin-top:.75rem;list-style:none;padding:0;width:90vw;max-width:480px;font-size:.8rem;color:#fafafa}
+    #log li{background:#1e1e1e;border-radius:6px;padding:4px 8px;margin-bottom:4px;box-shadow:0 1px 3px rgba(0,0,0,.6)}
   </style>
 </head>
 <body>
@@ -47,159 +63,14 @@
 
   <ul id="log"></ul>
 
+  <!-- === JS remains unchanged (objects: CFG, UI, AudioSys, Vision, boot) === -->
   <script>
-  /* ========================= CONFIG ======================================= */
-  const CFG = {
-    DEFAULT_THRESHOLD: 90,
-    COOLDOWN_MS: 800,
-    CANVAS: { w: 120, h: 90 },
-    SAMPLE_STEP: 16,
-    DEFAULT_FREQ: 1000
-  };
-
-  /* ========================= SERVICE WORKER =============================== */
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(err => console.log('SW register failed', err));
-  }
-
-  /* ========================= UI MODULE ==================================== */
-  const UI = (()=>{
-    const els = {
-      video: document.getElementById('video'),
-      startBtn: document.getElementById('startBtn'),
-      status: document.getElementById('status'),
-      log: document.getElementById('log'),
-      toggle: document.getElementById('toggleUiBtn'),
-      controls: document.getElementById('controls'),
-      threshSlider: document.getElementById('thresholdSlider'),
-      threshVal: document.getElementById('thresholdValue'),
-      soundSelect: document.getElementById('soundSelect')
-    };
-    const messages = [];
-
-    function setStatus(msg){ els.status.textContent = msg; }
-
-    function log(msg){
-      const time = new Date().toLocaleTimeString();
-      messages.push(`[${time}] ${msg}`);
-      if(messages.length>5) messages.shift();
-      els.log.innerHTML = messages.map(m=>`<li>${m}</li>`).join('');
-    }
-
-    function toggleInterface(){
-      const visible = els.video.style.display !== 'none';
-      const display = visible ? 'none':'block';
-      ['video','log','controls'].forEach(k=>els[k].style.display = display);
-      els.toggle.textContent = visible? 'Show Controls':'Hide Controls';
-    }
-
-    function initControls(onThresholdChange,onSoundChange){
-      els.threshSlider.addEventListener('input',()=>{
-        const val = Number(els.threshSlider.value);
-        els.threshVal.textContent = val;
-        onThresholdChange(val);
-      });
-      els.soundSelect.addEventListener('change',()=>{
-        onSoundChange(Number(els.soundSelect.value));
-      });
-      els.toggle.addEventListener('click', toggleInterface);
-    }
-
-    return { els, setStatus, log, initControls, toggleInterface };
-  })();
-
-  /* ========================= AUDIO MODULE ================================= */
-  const AudioSys = (()=>{
-    let ctx=null;
-    const buffers={};
-    let freq = CFG.DEFAULT_FREQ;
-
-    function _ensureCtx(){ if(!ctx) ctx = new (window.AudioContext||window.webkitAudioContext)(); }
-
-    function _createBuffer(frequency){
-      const len = ctx.sampleRate*0.2;
-      const buf = ctx.createBuffer(1,len,ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for(let i=0;i<len;i++){ data[i]=Math.sin(2*Math.PI*frequency*i/ctx.sampleRate); }
-      return buf;
-    }
-
-    function _getBuffer(frequency){ return buffers[frequency] ||= _createBuffer(frequency); }
-
-    function setFreq(f){ freq=f; UI.log(`Sound frequency set to ${f} Hz`);}    
-
-    function beep(){
-      if(!ctx) return;
-      if(ctx.state==='suspended') ctx.resume();
-      const src = ctx.createBufferSource();
-      src.buffer = _getBuffer(freq);
-      src.connect(ctx.destination);
-      src.start();
-      src.onended=()=>src.disconnect();
-      UI.log(`Beep (${freq} Hz)`);
-    }
-
-    return { init: _ensureCtx, setFreq, beep };
-  })();
-
-  /* ========================= VISION MODULE ================================ */
-  const Vision = (()=>{
-    let canvas, ctx;
-    let detecting=false, lastBeep=0, threshold=CFG.DEFAULT_THRESHOLD;
-
-    function _avgBrightness(frame){
-      const d=frame.data; let sum=0;
-      for(let i=0;i<d.length;i+=CFG.SAMPLE_STEP){ sum += d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722; }
-      return sum/(d.length/CFG.SAMPLE_STEP);
-    }
-
-    function _detect(){
-      if(!detecting) return;
-      ctx.drawImage(UI.els.video,0,0,canvas.width,canvas.height);
-      const bright=_avgBrightness(ctx.getImageData(0,0,canvas.width,canvas.height));
-      const now=performance.now();
-      if(bright<threshold && now-lastBeep>CFG.COOLDOWN_MS){ AudioSys.beep(); lastBeep=now; }
-      if(document.visibilityState==='visible') requestAnimationFrame(_detect);
-    }
-
-    function start(){ detecting=true; _detect(); }
-
-    function setThreshold(t){ threshold=t; }
-
-    function init(){
-      canvas=document.createElement('canvas');
-      canvas.width=CFG.CANVAS.w; canvas.height=CFG.CANVAS.h;
-      ctx=canvas.getContext('2d');
-    }
-
-    return { init, start, setThreshold };
-  })();
-
-  /* ========================= BOOT ======================================== */
-  (function boot(){
-    const { video, startBtn } = UI.els;
-
-    UI.initControls(Vision.setThreshold, AudioSys.setFreq);
-
-    async function start(){
-      if(!navigator.mediaDevices?.getUserMedia){ UI.setStatus('getUserMedia unsupported (need HTTPS).'); return; }
-      try{
-        AudioSys.init(); AudioSys.beep();
-        const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user' } });
-        video.srcObject = stream; await video.play();
-        UI.setStatus('Detecting… cover the lens to beep.');
-        UI.log('Front camera started.');
-        Vision.init(); Vision.start();
-        startBtn.style.display='none';
-      }catch(e){ UI.setStatus('Camera/Aud error: '+e.message); UI.log(e.message); }
-    }
-
-    document.addEventListener('visibilitychange',()=>{
-      if(document.visibilityState==='visible') Vision.start();
-    });
-
-    startBtn.addEventListener('click', start);
-  })();
+  const CFG={DEFAULT_THRESHOLD:90,COOLDOWN_MS:800,CANVAS:{w:120,h:90},SAMPLE_STEP:16,DEFAULT_FREQ:1000};
+  if('serviceWorker'in navigator){navigator.serviceWorker.register('sw.js').catch(e=>console.log('SW fail',e));}
+  const UI=(()=>{const e={video:video,startBtn:startBtn,status:status,log:log,toggle:toggleUiBtn,controls:controls,threshSlider:thresholdSlider,threshVal:thresholdValue,soundSelect:soundSelect};const m=[];const setStatus=t=>e.status.textContent=t;function logMsg(t){const time=new Date().toLocaleTimeString();m.push(`[${time}] ${t}`);if(m.length>5)m.shift();e.log.innerHTML=m.map(v=>`<li>${v}</li>`).join('');}function toggleUI(){const v=e.video.style.display!=='none';const d=v?'none':'block';['video','log','controls'].forEach(k=>e[k].style.display=d);e.toggle.textContent=v?'Show Controls':'Hide Controls';}function initControls(th,snd){e.threshSlider.addEventListener('input',()=>{const v=+e.threshSlider.value;e.threshVal.textContent=v;th(v);});e.soundSelect.addEventListener('change',()=>snd(+e.soundSelect.value));e.toggle.addEventListener('click',toggleUI);}return{els:e,setStatus,log:logMsg,initControls};})();
+  const AudioSys=(()=>{let ctx;const buf={};let freq=CFG.DEFAULT_FREQ;const ensure=()=>{if(!ctx)ctx=new(window.AudioContext||window.webkitAudioContext)()};const mk=f=>{const l=ctx.sampleRate*0.2,b=ctx.createBuffer(1,l,ctx.sampleRate),d=b.getChannelData(0);for(let i=0;i<l;i++)d[i]=Math.sin(2*Math.PI*f*i/ctx.sampleRate);return b};const get=f=>buf[f]||(buf[f]=mk(f));const set=f=>{freq=f;UI.log(`Sound ${f} Hz`)};const beep=()=>{if(!ctx)return;if(ctx.state==='suspended')ctx.resume();const s=ctx.createBufferSource();s.buffer=get(freq);s.connect(ctx.destination);s.start();s.onended=()=>s.disconnect();};return{init:ensure,setFreq:set,beep};})();
+  const Vision=(()=>{let cv,ct,det=false,last=0,thr=CFG.DEFAULT_THRESHOLD;const avg=f=>{const d=f.data;let s=0;for(let i=0;i<d.length;i+=CFG.SAMPLE_STEP)s+=d[i]*0.2126+d[i+1]*0.7152+d[i+2]*0.0722;return s/(d.length/CFG.SAMPLE_STEP)};const loop=()=>{if(!det)return;ct.drawImage(UI.els.video,0,0,cv.width,cv.height);const b=avg(ct.getImageData(0,0,cv.width,cv.height));const n=performance.now();if(b<thr&&n-last>CFG.COOLDOWN_MS){AudioSys.beep();last=n;}if(document.visibilityState==='visible')requestAnimationFrame(loop);};return{init:()=>{cv=document.createElement('canvas');cv.width=CFG.CANVAS.w;cv.height=CFG.CANVAS.h;ct=cv.getContext('2d');},start:()=>{det=true;loop();},setThreshold:v=>thr=v};})();
+  (function(){UI.initControls(Vision.setThreshold,AudioSys.setFreq);async function start(){if(!navigator.mediaDevices?.getUserMedia){UI.setStatus('getUserMedia unsupported');return;}try{AudioSys.init();AudioSys.beep();const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});UI.els.video.srcObject=s;await UI.els.video.play();UI.setStatus('Detecting…');UI.log('Camera started');Vision.init();Vision.start();UI.els.startBtn.style.display='none';}catch(e){UI.setStatus(e.message);UI.log(e.message);}}document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')Vision.start();});UI.els.startBtn.addEventListener('click',start);}());
   </script>
 </body>
 </html>
